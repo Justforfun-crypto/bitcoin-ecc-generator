@@ -1,0 +1,48 @@
+[package]
+name = "bitcoin-ecc-generator"
+version = "0.3.0"
+edition = "2021"
+
+[dependencies]
+secp256k1 = "0.28"
+num-bigint = "0.4"
+num-traits = "0.2"
+rayon = "1.7"
+sha2 = "0.10"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+criterion = "0.5"
+cfg-if = "1.0"
+bincode = "1.3"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[build-dependencies]
+cfg-if = "1.0"
+
+# CUDA support (optional, requires NVIDIA GPU and CUDA toolkit 11+)
+[features]
+default = []
+cuda = []
+quantum = []
+ml = []
+distributed = []
+simd = []
+all = ["cuda", "quantum", "ml", "distributed", "simd"]
+
+[[bench]]
+name = "pollard_kangaroo"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+overflow-checks = false
+
+[profile.bench]
+inherits = "release"
