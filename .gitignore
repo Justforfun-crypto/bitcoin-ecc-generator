@@ -2,5 +2,6 @@
 *.py
 run_aider_opt.sh
 run_ecc_bench.sh
-secp256k1_kernel.cu
 .aider*
+\!src/secp256k1_kernel.cu
+\!src/secp256k1_kernel.cu
