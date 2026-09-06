@@ -1,3 +1,4 @@
+use num_traits::Num;
 use num_bigint::BigUint;
 use crate::ecc::Point;
 use crate::jacobian::JacobianPoint;

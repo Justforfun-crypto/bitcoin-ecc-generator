@@ -8,7 +8,7 @@ pub struct WindowedMultiplier {
     /// Window width (typically 4-8)
     pub window_width: usize,
     /// Pre-computed table: window_table[i][j] = ((i+1) * 2^(j*w)) * G
-    pub window_table: Vec<Vec<Point>>,
+    pub window_table: Vec<Point>,
 }
 
 impl WindowedMultiplier {

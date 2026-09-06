@@ -1,3 +1,4 @@
+use num_traits::Num;
 use num_bigint::BigUint;
 use crate::ecc::Point;
 use crate::jacobian::JacobianPoint;
@@ -184,7 +185,8 @@ impl PollardsRhoOptimized {
 
         loop {
             let ys = y.clone();
-            for _ in 0..r.min(BigUint::from(1000u32)) {
+            let limit = r.to_u64_digits().first().cloned().unwrap_or(0).min(1000);
+            for _ in 0..limit {
                 y = Self::pseudo_random_step(&y, p, n);
                 let diff = Self::point_sub(&x, &y, p);
                 q = (q.clone() * Self::point_to_scalar(&diff, p)) % n;
@@ -194,7 +196,7 @@ impl PollardsRhoOptimized {
             x = y.clone();
 
             let gcd_val = Self::gcd(&q, n);
-            if gcd_val != BigUint::from(1u32) && gcd_val != n {
+            if gcd_val != BigUint::from(1u32) && gcd_val != *n {
                 return Some(gcd_val);
             }
 
