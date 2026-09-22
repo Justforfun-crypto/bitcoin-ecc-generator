@@ -1,7 +1,6 @@
 use num_bigint::BigUint;
 use num_traits::Num;
 use num_traits::Zero;
-use std::str::FromStr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Point {

@@ -43,7 +43,7 @@ fn verify_cuda_mul(a_std: &BigUint, b_std: &BigUint, manager: &GpuPipelineManage
         id,
         input_a: biguint_to_limbs(&a_mont),
         input_b: biguint_to_limbs(&b_mont),
-    };
+     output: vec![], };
 
     manager.submit(work_item).expect("Failed to submit GPU work item");
     let result = manager.collect_blocking().expect("Failed to collect GPU work result");
@@ -121,7 +121,7 @@ fn test_cuda_batch_pipeline_throughput() {
             id: i as u64,
             input_a: biguint_to_limbs(&a_mont),
             input_b: biguint_to_limbs(&b_mont),
-        };
+         output: vec![], };
 
         manager.submit(work_item).expect("Failed to submit work item during batch load");
     }

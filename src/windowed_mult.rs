@@ -18,10 +18,10 @@ impl WindowedMultiplier {
         let mut window_table = Vec::new();
 
         // Pre-compute [0*G, 1*G, 2*G, ..., (2^w-1)*G]
-        let mut base = Point::infinity();
+        let g = Point::generator();
         for i in 0..table_size {
-            window_table.push(base.clone());
-            base = scalar_mult(&base, &BigUint::from(1u32), p, n);
+            let multi = scalar_mult(&g, &BigUint::from(i as u32), p, n);
+            window_table.push(multi);
         }
 
         WindowedMultiplier {
@@ -162,12 +162,12 @@ fn point_add(p1: &Point, p2: &Point, p: &BigUint) -> Point {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
+    
 
     #[test]
     fn test_windowed_mult() {
-        let p = BigUint::from_str("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F").unwrap();
-        let n = BigUint::from_str("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141").unwrap();
+        let p = BigUint::parse_bytes(b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16).unwrap();
+        let n = BigUint::parse_bytes(b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16).unwrap();
         let multiplier = WindowedMultiplier::new(4, &p, &n);
         let scalar = BigUint::from(100u32);
         let result = multiplier.multiply(&scalar, &p);

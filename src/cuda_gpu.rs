@@ -2,13 +2,16 @@
 // Add to Cargo.toml: [build-dependencies] cuda = "0.3"
 
 #[cfg(feature = "cuda")]
-use cuda_runtime_sys::*;
+use cuda_runtime_sys::{
+    cudaGetDeviceCount, cudaSetDevice, cudaGetDeviceProperties,
+    cudaMalloc, cudaMemcpy, cudaMemcpyKind, cudaFree
+};
 
 /// CUDA GPU accelerator for ECC operations
 #[cfg(feature = "cuda")]
 pub mod cuda_accelerator {
-    use std::ffi::CString;
-    use std::os::raw::c_char;
+    #[allow(unused_imports)]
+    use super::*;
 
     pub struct CudaDevice {
         device_id: i32,
@@ -61,8 +64,8 @@ pub mod cuda_accelerator {
             result_y: &mut [u32],
         ) -> Result<(), String> {
             let num_points = scalars.len();
-            let threads_per_block = 256;
-            let blocks = (num_points + threads_per_block - 1) / threads_per_block;
+            let _threads_per_block = 256;
+            let _blocks = (num_points + 256 - 1) / 256;
 
             // Allocate GPU memory
             unsafe {
@@ -129,7 +132,7 @@ pub mod cuda_accelerator {
             let total_threads = (blocks * threads_per_block) as u64;
 
             // Each thread handles range_size / total_threads keys
-            let keys_per_thread = (range_size / total_threads).max(1);
+            let _keys_per_thread = (range_size / total_threads).max(1);
 
             // Allocate GPU memory for collision detection
             unsafe {

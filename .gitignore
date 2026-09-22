@@ -5,3 +5,33 @@ run_ecc_bench.sh
 .aider*
 \!src/secp256k1_kernel.cu
 \!src/secp256k1_kernel.cu
+
+# OpenClaw State
+.openclaw-state/
+openclaw-workspace-state.json
+AGENTS.md
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
+
+# OpenClaw State
+.openclaw-state/
+openclaw-workspace-state.json
+AGENTS.md
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
+
+# OpenClaw State
+.openclaw-state/
+openclaw-workspace-state.json
+AGENTS.md
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md

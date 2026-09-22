@@ -19,7 +19,7 @@ impl PrecomputedLUT {
         let mut lut = Vec::new();
         let mut inverse_lut = Vec::new();
         let g = Point::generator();
-        let step = (BigUint::from_str_radix("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16).unwrap() / BigUint::from(table_size as u64));
+        let step = BigUint::from_str_radix("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16).unwrap() / BigUint::from(table_size as u64);
 
         for level in 0..levels {
             let mut level_table = Vec::new();
@@ -311,9 +311,9 @@ mod tests {
 
     #[test]
     fn test_precomputed_lut() {
-        use std::str::FromStr;
-        let p = BigUint::from_str("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F").unwrap();
-        let n = BigUint::from_str("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141").unwrap();
+        
+        let p = BigUint::parse_bytes(b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16).unwrap();
+        let n = BigUint::parse_bytes(b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16).unwrap();
         let lut = PrecomputedLUT::new(2, 256, &p, &n);
         assert_eq!(lut.levels, 2);
         assert_eq!(lut.table_size, 256);
@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_brent_cycle() {
-        let f = |x: &i32| (x * x + 1) % 1000007;
+        let f = |x: &i32| ((*x as i64 * *x as i64 + 1) % 1000007) as i32;
         let (mu, lambda) = PollardBrentCycle::detect_cycle(2, f);
         assert!(mu >= 0);
         assert!(lambda > 0);

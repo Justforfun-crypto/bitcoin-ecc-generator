@@ -240,11 +240,11 @@ impl PollardsRhoOptimized {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
+    
 
     #[test]
     fn test_montgomery_ladder() {
-        let p = BigUint::from_str("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F").unwrap();
+        let p = BigUint::parse_bytes(b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16).unwrap();
         let k = BigUint::from(12345u32);
         let g = Point::generator();
         let result = MontgomeryLadder::multiply(&k, &g, &p);

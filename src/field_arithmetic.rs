@@ -1,7 +1,6 @@
 use num_bigint::BigUint;
 use crate::ecc::Point;
 use crate::jacobian::JacobianPoint;
-use std::collections::HashMap;
 
 /// Custom 256-bit field arithmetic (no BigUint overhead)
 /// Represents field elements as [u32; 8] for better cache locality
