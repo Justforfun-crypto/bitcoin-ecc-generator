@@ -2,9 +2,12 @@ pub mod math;
 pub mod keyspace;
 pub mod state_tracker;
 pub mod orchestrator;
+pub mod cuda_pipeline;
 
 pub use orchestrator::Orchestrator;
+pub use cuda_pipeline::{GpuPipelineManager, WorkItem};
 pub use num_bigint::BigUint;
+pub use num_traits::{Num, One};
 
 #[derive(Clone, Debug)]
 pub struct Point(pub secp256k1::PublicKey);

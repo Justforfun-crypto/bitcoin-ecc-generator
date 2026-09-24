@@ -1,15 +1,31 @@
+use num_bigint::BigUint;
+
 pub struct KeyspaceFilter {
-    start: u128,
-    end: u128,
-    step: u128,
+    pub start: BigUint,
+    pub end: BigUint,
+    pub stride: u64,
 }
 
 impl KeyspaceFilter {
-    pub fn new(start: u128, end: u128, step: u128) -> Self {
-        Self { start, end, step }
+    pub fn new(start: impl Into<BigUint>, end: impl Into<BigUint>, stride: u64) -> Self {
+        Self {
+            start: start.into(),
+            end: end.into(),
+            stride,
+        }
     }
 
-    pub fn contains(&self, key: u128) -> bool {
-        key >= self.start && key <= self.end && (key - self.start) % self.step == 0
+    pub fn chunk_ranges(&self, chunk_size: u64) -> Vec<(BigUint, BigUint)> {
+        let mut chunks = vec![];
+        let mut curr = self.start.clone();
+        let step = BigUint::from(chunk_size);
+        let end = &self.end;
+
+        while curr < *end {
+            let next = std::cmp::min(&curr + &step, end.clone());
+            chunks.push((curr.clone(), next.clone()));
+            curr = next;
+        }
+        chunks
     }
 }

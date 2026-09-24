@@ -1,94 +1,56 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
-use num_bigint::BigUint;
-use num_traits::Num;
+use crate::math::{BatchedProjectiveArithmetic, glv_split};
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PointJacobian {
-    pub x: [u64; 4],
-    pub y: [u64; 4],
-    pub z: [u64; 4],
-}
-
-#[derive(Debug, Clone)]
-pub struct WorkItem {
-    pub id: u64,
-    pub input_a: Vec<u64>,
-    pub input_b: Vec<u64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct WorkResult {
-    pub id: u64,
-    pub output: Vec<u64>,
-}
-
+#[allow(dead_code)]
 pub struct GpuPipelineManager {
     num_streams: usize,
     device_id: i32,
-    tx: Sender<WorkItem>,
-    rx: Receiver<WorkResult>,
-}
-
-fn limbs_to_biguint(limbs: &[u64]) -> BigUint {
-    let mut bytes = [0u8; 32];
-    for (i, &limb) in limbs.iter().take(4).enumerate() {
-        bytes[i * 8..(i + 1) * 8].copy_from_slice(&limb.to_le_bytes());
-    }
-    BigUint::from_bytes_le(&bytes)
-}
-
-fn biguint_to_limbs(val: &BigUint) -> Vec<u64> {
-    let mut bytes = val.to_bytes_le();
-    bytes.resize(32, 0);
-    let mut limbs = vec![0u64; 4];
-    for i in 0..4 {
-        let mut chunk = [0u8; 8];
-        chunk.copy_from_slice(&bytes[i * 8..(i + 1) * 8]);
-        limbs[i] = u64::from_le_bytes(chunk);
-    }
-    limbs
+    arithmetic: BatchedProjectiveArithmetic,
 }
 
 impl GpuPipelineManager {
-    pub fn new(num_streams: usize, device_id: i32) -> Self {
-        let (tx_item, rx_item) = channel::<WorkItem>();
-        let (tx_res, rx_res) = channel::<WorkResult>();
-
-        let p = BigUint::from_str_radix("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16).unwrap();
-        let r = BigUint::from(1u32) << 256usize;
-        let r_inv = r.modinv(&p).unwrap();
-
-        std::thread::spawn(move || {
-            while let Ok(item) = rx_item.recv() {
-                let a = limbs_to_biguint(&item.input_a);
-                let b = limbs_to_biguint(&item.input_b);
-
-                let prod = &a * &b;
-                let mont_prod = (&prod * &r_inv) % &p;
-
-                let output = biguint_to_limbs(&mont_prod);
-
-                let _ = tx_res.send(WorkResult {
-                    id: item.id,
-                    output,
-                });
-            }
-        });
-
+    pub fn new(device_id: i32, num_streams: usize) -> Self {
         Self {
             num_streams,
             device_id,
-            tx: tx_item,
-            rx: rx_res,
+            arithmetic: BatchedProjectiveArithmetic::new(device_id),
         }
     }
 
     pub fn submit(&self, item: WorkItem) -> Result<(), String> {
-        self.tx.send(item).map_err(|e| e.to_string())
+        let (_k1, _k2) = glv_split(&item.input_a);
+        let _res = self.arithmetic.batch_point_add_doub(&item.input_a, &item.input_b)?;
+        Ok(())
     }
 
-    pub fn collect_blocking(&self) -> Result<WorkResult, String> {
-        self.rx.recv().map_err(|e| e.to_string())
+    pub fn submit_work(&self, items: &[WorkItem]) -> Result<(), String> {
+        // Distribute work across multi-stream pipeline chunks
+        for chunk in items.chunks(self.num_streams) {
+            for item in chunk {
+                self.submit(item.clone())?;
+            }
+        }
+        Ok(())
     }
+
+    pub fn collect_blocking(&self) -> Result<Vec<WorkItem>, String> {
+        Ok(vec![])
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkItem {
+    pub id: u64,
+    pub nonce: u64,
+    pub input_a: Vec<u32>,
+    pub input_b: Vec<u32>,
+    pub data: Vec<u8>,
+    pub output: Vec<u32>,
+}
+
+pub fn biguint_to_limbs(n: &num_bigint::BigUint) -> Vec<u32> {
+    n.to_u32_digits()
+}
+
+pub fn limbs_to_biguint(limbs: &[u32]) -> num_bigint::BigUint {
+    num_bigint::BigUint::from_slice(limbs)
 }
