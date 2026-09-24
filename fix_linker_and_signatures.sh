@@ -1,3 +1,16 @@
+#!/bin/bash
+
+echo "=== 1. Making CUDA stream helper functions inline in secp256k1.cu ==="
+if [ -f "src/cuda/secp256k1.cu" ]; then
+    sed -i 's/int create_cuda_stream/inline int create_cuda_stream/g' src/cuda/secp256k1.cu
+    sed -i 's/int destroy_cuda_stream/inline int destroy_cuda_stream/g' src/cuda/secp256k1.cu
+    # Also handle extern "C" variants if present
+    sed -i 's/extern "C" int create_cuda_stream/extern "C" inline int create_cuda_stream/g' src/cuda/secp256k1.cu
+    sed -i 's/extern "C" int destroy_cuda_stream/extern "C" inline int destroy_cuda_stream/g' src/cuda/secp256k1.cu
+fi
+
+echo "=== 2. Updating src/cuda_pipeline.rs signature for run_multi_gpu_pipeline ==="
+cat << 'RUSTEOF' > src/cuda_pipeline.rs
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use num_bigint::BigUint;
@@ -205,7 +218,7 @@ impl Drop for GpuPipelineManager {
 pub fn run_multi_gpu_pipeline(
     start: u64,
     end: u64,
-    chunk_size: usize,
+    chunk_size: u64,
 ) -> Result<Vec<MatchResult>, String> {
     let manager = GpuPipelineManager::new(0, 2)?;
     let mut current = start;
@@ -215,9 +228,8 @@ pub fn run_multi_gpu_pipeline(
 
     while current < end {
         let span = end - current;
-        let chunk_u64 = chunk_size as u64;
-        let count = if span > chunk_u64 {
-            chunk_u64
+        let count = if span > chunk_size {
+            chunk_size
         } else {
             span
         };
@@ -233,3 +245,7 @@ pub fn run_multi_gpu_pipeline(
 
     Ok(all_matches)
 }
+RUSTEOF
+
+echo "=== 3. Running Build and Test Suite ==="
+cargo test --features cuda --test cuda_test -- --test-threads=1 --nocapture

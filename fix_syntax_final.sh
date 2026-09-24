@@ -1,3 +1,4 @@
+cat << 'RUSTEOF' > src/cuda_pipeline.rs
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use num_bigint::BigUint;
@@ -101,11 +102,7 @@ impl GpuPipelineManager {
         let mut match_buffer = vec![MatchResult { priv_low: 0, priv_high: 0, compressed_pubkey: [0; 33] }; 2048];
 
         while let Some(item) = queue.pop() {
-            let limbs = if item.input_a[0] != 0 || item.input_a[1] != 0 {
-                item.input_a
-            } else {
-                biguint_to_limbs(&item.start_key)
-            };
+            let limbs = item.input_a;
             let count = if item.count > 0 { item.count } else { 10000 };
             let mut match_count: u32 = 0;
 
@@ -203,9 +200,9 @@ impl Drop for GpuPipelineManager {
 }
 
 pub fn run_multi_gpu_pipeline(
-    start: u64,
-    end: u64,
-    chunk_size: usize,
+    start: BigUint,
+    end: BigUint,
+    chunk_size: u64,
 ) -> Result<Vec<MatchResult>, String> {
     let manager = GpuPipelineManager::new(0, 2)?;
     let mut current = start;
@@ -214,22 +211,22 @@ pub fn run_multi_gpu_pipeline(
     let empty_bloom = Vec::new();
 
     while current < end {
-        let span = end - current;
-        let chunk_u64 = chunk_size as u64;
-        let count = if span > chunk_u64 {
-            chunk_u64
+        let span = &end - &current;
+        let count = if span > BigUint::from(chunk_size) {
+            chunk_size
         } else {
-            span
+            span.iter_u64_digits().next().unwrap_or(1)
         };
 
-        let current_biguint = BigUint::from(current);
-        let found = manager.execute_batch(&current_biguint, count, &empty_bloom, &mut match_buffer)?;
+        let found = manager.execute_batch(&current, count, &empty_bloom, &mut match_buffer)?;
         for i in 0..(found as usize) {
             all_matches.push(match_buffer[i]);
         }
 
-        current += count;
+        current += BigUint::from(count);
     }
 
     Ok(all_matches)
 }
+RUSTEOF
+echo "=== Syntax Corrected Successfully ==="

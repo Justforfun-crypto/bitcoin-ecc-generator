@@ -3,7 +3,7 @@ use bitcoin_ecc_generator::BigUint;
 
 #[test]
 fn test_cuda_pipeline_basic() {
-    let manager = GpuPipelineManager::new(0, 2);
+    let manager = GpuPipelineManager::new(0, 2).unwrap();
     let a = BigUint::from(12345u32);
     let b = BigUint::from(67890u32);
 
@@ -14,6 +14,8 @@ fn test_cuda_pipeline_basic() {
         input_b: biguint_to_limbs(&b),
         data: vec![],
         output: vec![],
+        start_key: a.clone(),
+        count: 1000,
     };
 
     assert!(manager.submit(work_item).is_ok());

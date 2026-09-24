@@ -1,5 +1,15 @@
+#!/bin/bash
+echo "=== 1. Inspecting src/main.rs around line 50 ==="
+sed -n '40,65p' src/main.rs
+
+echo "=== 2. Inspecting tests/cuda_test.rs ==="
+cat tests/cuda_test.rs
+
+echo "=== 3. Writing fully compatible src/cuda_pipeline.rs ==="
+cat << 'RUSTEOF' > src/cuda_pipeline.rs
 use std::ptr;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use num_bigint::BigUint;
 
 #[repr(C)]
@@ -88,24 +98,22 @@ impl GpuPipelineManager {
     pub fn submit(&self, work_item: WorkItem) -> Result<(), String> {
         let mut queue = self.queue.lock().map_err(|e| e.to_string())?;
         queue.push(work_item);
+        
+        // Process synchronously on submission for test/pipeline compatibility
         drop(queue);
         self.process_queue_internal()?;
         Ok(())
     }
 
     fn process_queue_internal(&self) -> Result<(), String> {
-        let mut queue = self.queue.lock().map_err(|e| e.to_string())?;
+        let mut queue = self.queue.lock().map_err(|e| e.to_string রাগ;
         let mut results = self.results.lock().map_err(|e| e.to_string())?;
 
         let empty_bloom = Vec::new();
         let mut match_buffer = vec![MatchResult { priv_low: 0, priv_high: 0, compressed_pubkey: [0; 33] }; 2048];
 
         while let Some(item) = queue.pop() {
-            let limbs = if item.input_a[0] != 0 || item.input_a[1] != 0 {
-                item.input_a
-            } else {
-                biguint_to_limbs(&item.start_key)
-            };
+            let limbs = item.input_a;
             let count = if item.count > 0 { item.count } else { 10000 };
             let mut match_count: u32 = 0;
 
@@ -143,10 +151,10 @@ impl GpuPipelineManager {
         Ok(())
     }
 
-    pub fn collect_blocking(&self) -> Result<Vec<(WorkItem, Vec<MatchResult>)>, String> {
-        let mut results = self.results.lock().map_err(|e| e.to_string())?;
+    pub fn collect_blocking(&self) -> Vec<(WorkItem, Vec<MatchResult>)> {
+        let mut results = self.results.lock().unwrap();
         let drained: Vec<_> = results.drain(..).collect();
-        Ok(drained)
+        drained
     }
 
     pub fn execute_batch(
@@ -203,9 +211,9 @@ impl Drop for GpuPipelineManager {
 }
 
 pub fn run_multi_gpu_pipeline(
-    start: u64,
-    end: u64,
-    chunk_size: usize,
+    start: BigUint,
+    end: BigUint,
+    chunk_size: u64,
 ) -> Result<Vec<MatchResult>, String> {
     let manager = GpuPipelineManager::new(0, 2)?;
     let mut current = start;
@@ -214,22 +222,24 @@ pub fn run_multi_gpu_pipeline(
     let empty_bloom = Vec::new();
 
     while current < end {
-        let span = end - current;
-        let chunk_u64 = chunk_size as u64;
-        let count = if span > chunk_u64 {
-            chunk_u64
+        let span = &end - &current;
+        let count = if span > BigUint::from(chunk_size) {
+            chunk_size
         } else {
-            span
+            span.iter_u64_digits().next().unwrap_or(1)
         };
 
-        let current_biguint = BigUint::from(current);
-        let found = manager.execute_batch(&current_biguint, count, &empty_bloom, &mut match_buffer)?;
+        let found = manager.execute_batch(&current, count, &empty_bloom, &mut match_buffer)?;
         for i in 0..(found as usize) {
             all_matches.push(match_buffer[i]);
         }
 
-        current += count;
+        current += BigUint::from(count);
     }
 
     Ok(all_matches)
 }
+RUSTEOF
+
+echo "=== Running Test Suite Verification ==="
+cargo test --features cuda --test cuda_test -- --test-threads=1 --nocapture

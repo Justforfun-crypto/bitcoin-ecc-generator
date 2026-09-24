@@ -1,5 +1,6 @@
+cat << 'RUSTEOF' > src/cuda_pipeline.rs
 use std::ptr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use num_bigint::BigUint;
 
 #[repr(C)]
@@ -30,14 +31,7 @@ extern "C" {
     fn cudaStreamSynchronize(stream: cudaStream_t) -> i32;
 }
 
-#[derive(Clone, Debug)]
 pub struct WorkItem {
-    pub id: u64,
-    pub nonce: u64,
-    pub input_a: [u64; 2],
-    pub input_b: [u64; 2],
-    pub data: Vec<u8>,
-    pub output: Vec<u8>,
     pub start_key: BigUint,
     pub count: u64,
 }
@@ -64,12 +58,10 @@ pub fn biguint_to_limbs(n: &BigUint) -> [u64; 2] {
 pub struct GpuPipelineManager {
     device_id: i32,
     stream: cudaStream_t,
-    queue: Arc<Mutex<Vec<WorkItem>>>,
-    results: Arc<Mutex<Vec<(WorkItem, Vec<MatchResult>)>>>,
 }
 
 impl GpuPipelineManager {
-    pub fn new(device_id: i32, _num_streams: usize) -> Result<Self, String> {
+    pub fn new(device_id: i32) -> Result<Self, String> {
         let mut stream: cudaStream_t = ptr::null_mut();
         unsafe {
             let res = create_cuda_stream(&mut stream);
@@ -77,76 +69,7 @@ impl GpuPipelineManager {
                 return Err(format!("Failed to create async CUDA stream: error code {}", res));
             }
         }
-        Ok(Self {
-            device_id,
-            stream,
-            queue: Arc::new(Mutex::new(Vec::new())),
-            results: Arc::new(Mutex::new(Vec::new())),
-        })
-    }
-
-    pub fn submit(&self, work_item: WorkItem) -> Result<(), String> {
-        let mut queue = self.queue.lock().map_err(|e| e.to_string())?;
-        queue.push(work_item);
-        drop(queue);
-        self.process_queue_internal()?;
-        Ok(())
-    }
-
-    fn process_queue_internal(&self) -> Result<(), String> {
-        let mut queue = self.queue.lock().map_err(|e| e.to_string())?;
-        let mut results = self.results.lock().map_err(|e| e.to_string())?;
-
-        let empty_bloom = Vec::new();
-        let mut match_buffer = vec![MatchResult { priv_low: 0, priv_high: 0, compressed_pubkey: [0; 33] }; 2048];
-
-        while let Some(item) = queue.pop() {
-            let limbs = if item.input_a[0] != 0 || item.input_a[1] != 0 {
-                item.input_a
-            } else {
-                biguint_to_limbs(&item.start_key)
-            };
-            let count = if item.count > 0 { item.count } else { 10000 };
-            let mut match_count: u32 = 0;
-
-            let res = unsafe {
-                execute_secp256k1_batch_async_v2(
-                    self.device_id,
-                    limbs.as_ptr(),
-                    count,
-                    empty_bloom.as_ptr(),
-                    empty_bloom.len(),
-                    match_buffer.as_mut_ptr(),
-                    match_buffer.len() as u32,
-                    &mut match_count,
-                    self.stream,
-                )
-            };
-
-            if res != 0 {
-                return Err(format!("Apex CUDA execution failed with error code: {}", res));
-            }
-
-            unsafe {
-                cudaStreamSynchronize(self.stream);
-            }
-
-            let mut collected = Vec::new();
-            for i in 0..(match_count as usize) {
-                if i < match_buffer.len() {
-                    collected.push(match_buffer[i]);
-                }
-            }
-            results.push((item, collected));
-        }
-
-        Ok(())
-    }
-
-    pub fn collect_blocking(&self) -> Result<Vec<(WorkItem, Vec<MatchResult>)>, String> {
-        let mut results = self.results.lock().map_err(|e| e.to_string())?;
-        let drained: Vec<_> = results.drain(..).collect();
-        Ok(drained)
+        Ok(Self { device_id, stream })
     }
 
     pub fn execute_batch(
@@ -203,33 +126,37 @@ impl Drop for GpuPipelineManager {
 }
 
 pub fn run_multi_gpu_pipeline(
-    start: u64,
-    end: u64,
-    chunk_size: usize,
+    start: BigUint,
+    end: BigUint,
+    chunk_size: u64,
 ) -> Result<Vec<MatchResult>, String> {
-    let manager = GpuPipelineManager::new(0, 2)?;
+    // Placeholder or wrapper for multi-gpu orchestrator using GpuPipelineManager on device 0
+    let manager = GpuPipelineManager::new(0)?;
     let mut current = start;
     let mut all_matches = Vec::new();
-    let mut match_buffer = vec![MatchResult { priv_low: 0, priv_high: 0, compressed_pubkey: [0; 33] }; 2048];
+    let mut match_buffer = vec![MatchResult { priv_low: 0, priv_high: 0, compressed_pubkey: [0; 33] }; 1024];
+
+    // Dummy empty bloom filter for baseline check if none loaded
     let empty_bloom = Vec::new();
 
     while current < end {
-        let span = end - current;
-        let chunk_u64 = chunk_size as u64;
-        let count = if span > chunk_u64 {
-            chunk_u64
+        let span = &end - &current;
+        let count = if span > BigUint::from(chunk_size) {
+            chunk_size
         } else {
-            span
+            // Convert safely or take u64 representation
+            span.iter_u64_digits().next().unwrap_or(1)
         };
 
-        let current_biguint = BigUint::from(current);
-        let found = manager.execute_batch(&current_biguint, count, &empty_bloom, &mut match_buffer)?;
+        let found = manager.execute_batch(&current, count, &empty_bloom, &mut match_buffer)?;
         for i in 0..(found as usize) {
             all_matches.push(match_buffer[i]);
         }
 
-        current += count;
+        current += BigUint::from(count);
     }
 
     Ok(all_matches)
 }
+RUSTEOF
+echo "=== Pipeline API Restored Successfully ==="

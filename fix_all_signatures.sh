@@ -1,3 +1,7 @@
+#!/bin/bash
+
+echo "=== 1. Updating src/cuda_pipeline.rs ==="
+cat << 'RUSTEOF' > src/cuda_pipeline.rs
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use num_bigint::BigUint;
@@ -203,8 +207,8 @@ impl Drop for GpuPipelineManager {
 }
 
 pub fn run_multi_gpu_pipeline(
-    start: u64,
-    end: u64,
+    start: BigUint,
+    end: BigUint,
     chunk_size: usize,
 ) -> Result<Vec<MatchResult>, String> {
     let manager = GpuPipelineManager::new(0, 2)?;
@@ -214,22 +218,72 @@ pub fn run_multi_gpu_pipeline(
     let empty_bloom = Vec::new();
 
     while current < end {
-        let span = end - current;
-        let chunk_u64 = chunk_size as u64;
-        let count = if span > chunk_u64 {
-            chunk_u64
+        let span = &end - &current;
+        let chunk_biguint = BigUint::from(chunk_size as u64);
+        let count = if span > chunk_biguint {
+            chunk_size as u64
         } else {
-            span
+            span.iter_u64_digits().next().unwrap_or(1)
         };
 
-        let current_biguint = BigUint::from(current);
-        let found = manager.execute_batch(&current_biguint, count, &empty_bloom, &mut match_buffer)?;
+        let found = manager.execute_batch(&current, count, &empty_bloom, &mut match_buffer)?;
         for i in 0..(found as usize) {
             all_matches.push(match_buffer[i]);
         }
 
-        current += count;
+        current += BigUint::from(count);
     }
 
     Ok(all_matches)
 }
+RUSTEOF
+
+echo "=== 2. Updating tests/cuda_test.rs ==="
+cat << 'TESTEOF' > tests/cuda_test.rs
+use bitcoin_ecc_generator::cuda_pipeline::{GpuPipelineManager, WorkItem, biguint_to_limbs};
+use bitcoin_ecc_generator::BigUint;
+
+#[test]
+fn test_cuda_pipeline_basic() {
+    let manager = GpuPipelineManager::new(0, 2).unwrap();
+    let a = BigUint::from(12345u32);
+    let b = BigUint::from(67890u32);
+
+    let work_item = WorkItem {
+        id: 1,
+        nonce: 0,
+        input_a: biguint_to_limbs(&a),
+        input_b: biguint_to_limbs(&b),
+        data: vec![],
+        output: vec![],
+        start_key: a.clone(),
+        count: 1000,
+    };
+
+    assert!(manager.submit(work_item).is_ok());
+    let results = manager.collect_blocking();
+    assert!(results.is_ok());
+}
+
+#[test]
+fn test_keyspace_and_state() {
+    use bitcoin_ecc_generator::keyspace::KeyspaceFilter;
+    use bitcoin_ecc_generator::state_tracker::StateTracker;
+    
+    let tmp_dir = std::env::temp_dir().join("bitcoin_ecc_test_db");
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    let tracker = StateTracker::new(&tmp_dir).unwrap();
+    tracker.save_checkpoint("test_key", b"test_val").unwrap();
+    let val = tracker.get_checkpoint("test_key").unwrap();
+    assert!(val.is_some());
+
+    let filter = KeyspaceFilter::new(0u32, 1000u32, 1);
+    assert_eq!(filter.stride, 1);
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+TESTEOF
+
+echo "=== Running Test Suite Verification ==="
+cargo test --features cuda --test cuda_test -- --test-threads=1 --nocapture

@@ -1,3 +1,8 @@
+#!/bin/bash
+set -e
+
+echo "=== [1/3] Deploying Apex CUDA Kernel with Warp-Level Shuffles & Optimized Tables ==="
+cat << 'CUEOF' > src/cuda/secp256k1.cu
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -108,12 +113,12 @@ void secp256k1_apex_kernel(
     }
 }
 
-extern "C" inline int create_cuda_stream(cudaStream_t* stream) {
+extern "C" int create_cuda_stream(cudaStream_t* stream) {
     cudaGetLastError();
     return (int)cudaStreamCreate(stream);
 }
 
-extern "C" inline int destroy_cuda_stream(cudaStream_t stream) {
+extern "C" int destroy_cuda_stream(cudaStream_t stream) {
     return (int)cudaStreamDestroy(stream);
 }
 
@@ -176,3 +181,124 @@ extern "C" int execute_secp256k1_batch_async_v2(
 
     return (int)cudaSuccess;
 }
+CUEOF
+
+echo "=== [2/3] Updating Rust Pipeline Orchestrator for Multi-Stream Ring Buffers ==="
+cat << 'RUSTEOF' > src/cuda_pipeline.rs
+use std::ptr;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct MatchResult {
+    pub priv_low: u64,
+    pub priv_high: u64,
+    pub compressed_pubkey: [u8; 33],
+}
+
+#[opaque]
+#[allow(non_camel_case_types)]
+pub type cudaStream_t = *mut std::os::raw::c_void;
+
+extern "C" {
+    fn create_cuda_stream(stream: *mut cudaStream_t) -> i32;
+    fn destroy_cuda_stream(stream: cudaStream_t) -> i32;
+    fn execute_secp256k1_batch_async_v2(
+        device_id: i32,
+        chunk_start: *const u64,
+        count: u64,
+        h_bloom_filter: *const u8,
+        bloom_bytes: usize,
+        h_out_matches: *mut MatchResult,
+        max_matches: u32,
+        out_match_count: *mut u32,
+        stream: cudaStream_t,
+    ) -> i32;
+}
+
+pub struct CudaPipeline {
+    device_id: i32,
+    stream: cudaStream_t,
+}
+
+impl CudaPipeline {
+    pub fn new(device_id: i32) -> Result<Self, String> {
+        let mut stream: cudaStream_t = ptr::null_mut();
+        unsafe {
+            let res = create_cuda_stream(&mut stream);
+            if res != 0 {
+                return Err(format!("Failed to create async CUDA stream: error code {}", res));
+            }
+        }
+        Ok(Self { device_id, stream })
+    }
+
+    pub fn execute_batch(
+        &self,
+        start_key: u128,
+        count: u64,
+        bloom_filter: &[u8],
+        matches: &mut [MatchResult],
+    ) -> Result<u32, String> {
+        let priv_low = (start_key & 0xFFFFFFFFFFFFFFFF) as u64;
+        let priv_high = (start_key >> 64) as u64;
+        let chunk_start = [priv_low, priv_high];
+
+        let mut match_count: u32 = 0;
+        let max_matches = matches.len() as u32;
+
+        let bloom_ptr = if bloom_filter.is_empty() {
+            ptr::null()
+        } else {
+            bloom_filter.as_ptr()
+        };
+
+        let res = unsafe {
+            execute_secp256k1_batch_async_v2(
+                self.device_id,
+                chunk_start.as_ptr(),
+                count,
+                bloom_ptr,
+                bloom_filter.len(),
+                matches.as_mut_ptr(),
+                max_matches,
+                &mut match_count,
+                self.stream,
+            )
+        };
+
+        if res != 0 {
+            return Err(format!("Apex CUDA execution failed with error code: {}", res));
+        }
+
+        // Synchronize stream to ensure completion for this batch
+        unsafe {
+            cuda_synchronize_stream(self.stream);
+        }
+
+        Ok(match_count)
+    }
+}
+
+extern "C" {
+    fn cudaStreamSynchronize(stream: cudaStream_t) -> i32;
+}
+
+unsafe fn cuda_synchronize_stream(stream: cudaStream_t) {
+    cudaStreamSynchronize(stream);
+}
+
+impl Drop for CudaPipeline {
+    fn drop(&mut self) {
+        if !self.stream.is_null() {
+            unsafe {
+                destroy_cuda_stream(self.stream);
+            }
+        }
+    }
+}
+RUSTEOF
+
+echo "=== [3/3] Running Apex Test Suite Verification ==="
+cargo test --features cuda --test cuda_test -- --test-threads=1 --nocapture
+
+echo "=== Apex Architecture Deployed Successfully! ==="
