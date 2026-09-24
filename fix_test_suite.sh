@@ -1,4 +1,9 @@
-use bitcoin_ecc_generator::cuda_pipeline::{GpuPipelineManager, WorkItem, biguint_to_limbs};
+#!/bin/bash
+set -e
+
+echo "=== [1/4] Writing clean tests/cuda_test.rs ==="
+cat << 'TestEOF' > tests/cuda_test.rs
+use bitcoin_ecc_generator::cuda_pipeline::{GpuPipelineManager, WorkItem, biguint_to_limbs, limbs_to_biguint};
 use bitcoin_ecc_generator::BigUint;
 
 #[test]
@@ -39,3 +44,16 @@ fn test_keyspace_and_state() {
 
     let _ = std::fs::remove_dir_all(&tmp_dir);
 }
+TestEOF
+
+echo "=== [2/4] Running Test Suite with CUDA Features ==="
+cargo test --features cuda
+
+echo "=== [3/4] Committing Changes to Git ==="
+git add tests/cuda_test.rs
+git commit -m "test: align integration tests with cuda_pipeline WorkItem and GpuPipelineManager API"
+
+echo "=== [4/4] Pushing to Remote Repository ==="
+git push origin main
+
+echo "=== Success! Test suite compiled, executed successfully, committed, and pushed. ==="

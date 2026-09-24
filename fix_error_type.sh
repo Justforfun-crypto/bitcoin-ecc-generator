@@ -1,3 +1,8 @@
+#!/bin/bash
+set -e
+
+echo "=== Updating src/math.rs error type to String ==="
+cat << 'MathEOF' > src/math.rs
 use std::ffi::c_int;
 use num_bigint::BigUint;
 
@@ -31,3 +36,13 @@ pub fn glv_split(scalar: &Vec<u32>) -> (BigUint, BigUint) {
     let combined = scalar.iter().fold(0u64, |acc, &val| acc.wrapping_add(val as u64));
     (BigUint::from(combined), BigUint::from(0u32))
 }
+MathEOF
+
+echo "=== Building & Testing with CUDA ==="
+cargo build --features cuda
+cargo test --features cuda
+
+echo "=== Executing Multi-GPU Test Run ==="
+cargo run --features cuda -- --start 1 --end 50000 --chunk-size 1000
+
+echo "=== Build and execution successful! ==="

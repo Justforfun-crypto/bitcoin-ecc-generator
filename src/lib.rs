@@ -1,41 +1,52 @@
 pub mod math;
-pub mod keyspace;
-pub mod state_tracker;
-pub mod orchestrator;
 pub mod cuda_pipeline;
+pub mod orchestrator;
 
-pub use orchestrator::Orchestrator;
-pub use cuda_pipeline::{GpuPipelineManager, WorkItem};
 pub use num_bigint::BigUint;
-pub use num_traits::{Num, One};
 
-#[derive(Clone, Debug)]
-pub struct Point(pub secp256k1::PublicKey);
-
-impl Point {
-    pub fn generator() -> Self {
-        let secp = secp256k1::Secp256k1::new();
-        let sk_bytes = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1];
-        let sk = secp256k1::SecretKey::from_slice(&sk_bytes).unwrap();
-        let pk = secp256k1::PublicKey::from_secret_key(&secp, &sk);
-        Point(pk)
+pub mod keyspace {
+    #[derive(Debug, Clone)]
+    pub struct KeyspaceFilter {
+        pub start: u32,
+        pub end: u32,
+        pub stride: usize,
+    }
+    impl KeyspaceFilter {
+        pub fn new(start: u32, end: u32, stride: usize) -> Self {
+            Self { start, end, stride }
+        }
     }
 }
 
-#[allow(dead_code)]
-pub struct HybridSearch {
-    target: Point,
-    start: BigUint,
-    end: BigUint,
-}
+pub mod state_tracker {
+    use std::fs;
+    use std::path::{Path, PathBuf};
 
-impl HybridSearch {
-    pub fn new(target: Point, start: BigUint, end: BigUint) -> Self {
-        Self { target, start, end }
+    #[derive(Debug, Clone)]
+    pub struct StateTracker {
+        db_path: PathBuf,
     }
 
-    pub fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
-        println!("HybridSearch active for target across range {}..{}", self.start, self.end);
-        Ok(())
+    impl StateTracker {
+        pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+            let db_path = path.as_ref().to_path_buf();
+            fs::create_dir_all(&db_path).map_err(|e| e.to_string())?;
+            Ok(Self { db_path })
+        }
+
+        pub fn save_checkpoint(&self, key: &str, val: &[u8]) -> Result<(), String> {
+            let file_path = self.db_path.join(format!("{}.bin", key));
+            fs::write(file_path, val).map_err(|e| e.to_string())
+        }
+
+        pub fn get_checkpoint(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
+            let file_path = self.db_path.join(format!("{}.bin", key));
+            if file_path.exists() {
+                let data = fs::read(file_path).map_err(|e| e.to_string())?;
+                Ok(Some(data))
+            } else {
+                Ok(None)
+            }
+        }
     }
 }
