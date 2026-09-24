@@ -1,6 +1,7 @@
 pub mod math;
 pub mod cuda_pipeline;
 pub mod orchestrator;
+pub mod bloom;
 
 pub use num_bigint::BigUint;
 

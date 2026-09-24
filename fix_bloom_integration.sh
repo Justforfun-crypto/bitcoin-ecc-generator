@@ -1,3 +1,8 @@
+#!/bin/bash
+set -e
+
+echo "=== Updating src/cuda_pipeline.rs with Bloom Filter Integration & Struct Fixes ==="
+cat << 'PipelineEOF' > src/cuda_pipeline.rs
 use std::ffi::c_int;
 use num_bigint::BigUint;
 use std::sync::{Arc, Mutex};
@@ -221,3 +226,13 @@ extern "C" {
 pub unsafe fn execute_secp256k1_batch_ffi(device_id: i32, chunk_start: &u64, count: u64, out_pubkeys: *mut u8) -> i32 {
     execute_secp256k1_batch(device_id, chunk_start, count, out_pubkeys)
 }
+PipelineEOF
+
+echo "=== Building & Testing with CUDA & Bloom Filter ==="
+cargo build --features cuda
+cargo test --features cuda
+
+echo "=== Running Production Pipeline with Bloom Filtering ==="
+cargo run --features cuda -- --start 1 --end 50000 --chunk-size 10000
+
+echo "=== All Bloom filter integration checks passed successfully! ==="
