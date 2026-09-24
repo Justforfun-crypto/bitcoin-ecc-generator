@@ -36,11 +36,14 @@ impl Orchestrator {
                 }
             }
         });
+        
+        // Drop the original sender so the receiver knows when all chunks have been sent
+        drop(tx);
 
         let pipeline_ref = Arc::clone(&self.pipeline);
         let state_ref = Arc::clone(&self.state);
 
-        while let Some((start, end)) = rx.recv().await {
+        while let Some((start, _end)) = rx.recv().await {
             state_ref.save_checkpoint("last_processed_chunk", start.to_string().as_bytes())?;
             
             let work_item = WorkItem {
