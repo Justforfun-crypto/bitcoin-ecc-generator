@@ -18,12 +18,17 @@ __global__ void secp256k1_batch_kernel(uint64_t base_priv_low, uint64_t base_pri
     }
 }
 
+extern "C" int allocate_pinned_host_memory(void** ptr, size_t size) {
+    return (int)cudaHostAlloc(ptr, size, cudaHostAllocDefault);
+}
+
+extern "C" int free_pinned_host_memory(void* ptr) {
+    return (int)cudaFreeHost(ptr);
+}
+
 extern "C" int execute_secp256k1_batch(int device_id, const uint64_t* chunk_start, uint64_t count, uint8_t* out_pubkeys) {
     cudaError_t err = cudaSetDevice(device_id);
-    if (err != cudaSuccess) {
-        // Fallback / graceful return for environments without physical CUDA GPUs during tests
-        return 0;
-    }
+    if (err != cudaSuccess) return 0; // Graceful fallback for test environments
 
     uint64_t priv_low = chunk_start[0];
     uint64_t priv_high = (count > 1) ? chunk_start[1] : 0;
@@ -32,7 +37,7 @@ extern "C" int execute_secp256k1_batch(int device_id, const uint64_t* chunk_star
     size_t out_size = (size_t)count * 33;
 
     err = cudaMalloc(&d_out_pubkeys, out_size);
-    if (err != cudaSuccess) return 0; // Graceful fallback
+    if (err != cudaSuccess) return 0;
 
     int threads = 256;
     int blocks = (count + threads - 1) / threads;

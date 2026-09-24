@@ -1,3 +1,13 @@
+#!/bin/bash
+set -e
+
+echo "=== 1. Removing ureq from Cargo.toml ==="
+if grep -q "ureq" Cargo.toml; then
+    sed -i '/ureq/d' Cargo.toml
+fi
+
+echo "=== 2. Updating src/cuda_pipeline.rs to use native curl for webhooks ==="
+cat << 'PipelineEOF' > src/cuda_pipeline.rs
 use std::ffi::c_int;
 use num_bigint::BigUint;
 use std::sync::{Arc, Mutex};
@@ -258,3 +268,13 @@ extern "C" {
 pub unsafe fn execute_secp256k1_batch_ffi(device_id: i32, chunk_start: &u64, count: u64, out_pubkeys: *mut u8) -> i32 {
     execute_secp256k1_batch(device_id, chunk_start, count, out_pubkeys)
 }
+PipelineEOF
+
+echo "=== 3. Building & Testing Successfully on Rust 1.85 ==="
+cargo build --features cuda
+cargo test --features cuda
+
+echo "=== 4. Running Production Pipeline Test ==="
+cargo run --features cuda -- --start 400001 --end 500000 --chunk-size 10000
+
+echo "=== All upgrades compiled and executed successfully! ==="
