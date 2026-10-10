@@ -15,8 +15,11 @@ struct Args {
     #[arg(short, long, default_value_t = 1)]
     start: u64,
 
-    #[arg(short, long, default_value_t = 100000)]
-    end: u64,
+    #[arg(short, long)]
+    end: Option<u64>,
+
+    #[arg(short, long, default_value_t = 1000000)]
+    stride: u64,
 
     #[arg(short, long, default_value_t = 5000)]
     chunk_size: usize,
@@ -30,7 +33,6 @@ pub fn verify_and_log_match(
     priv_key_hex: &str,
     target_store: &TargetStore,
 ) {
-    // Pass 2: Deterministic verification against exact target set
     if target_store.exact_targets.contains(candidate_hash160) {
         let match_msg = format!(
             "MATCH CONFIRMED! Hash160: {} | Private Key: {}\n",
@@ -64,14 +66,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bloom_bytes = target_store.bloom_filter.to_bytes();
 
     let mut current_start = args.start;
-    let range = args.end.saturating_sub(args.start);
+    let step = match args.end {
+        Some(e) if e > args.start => e - args.start,
+        _ => args.stride,
+    };
 
     loop {
-        let current_end = if args.continuous && range > 0 {
-            current_start.saturating_add(range)
-        } else {
-            args.end
-        };
+        let current_end = current_start.saturating_add(step);
 
         println!("Keyspace Range: [{}, {}]", current_start, current_end);
         println!("Chunk Size: {}", args.chunk_size);
