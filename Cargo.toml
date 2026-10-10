@@ -5,6 +5,10 @@ edition = "2021"
 build = "build.rs"
 
 [dependencies]
+sha2 = "0.10"
+bs58 = "0.5"
+bech32 = "0.9"
+hex = "0.4"
 sled = "0.34"
 tokio = { version = "1.0", features = ["full"] }
 log = "0.4"
@@ -14,8 +18,15 @@ num-traits = "0.2"
 secp256k1 = { version = "0.27", features = ["rand", "recovery"] }
 clap = { version = "4.0", features = ["derive"] }
 
+[dev-dependencies]
+criterion = "0.5"
+
 [build-dependencies]
 cc = { version = "1.0", features = ["parallel"] }
 
 [features]
 cuda = []
+
+[[bench]]
+name = "pollard_kangaroo"
+harness = false
