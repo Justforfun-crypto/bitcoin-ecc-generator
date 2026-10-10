@@ -8,16 +8,17 @@ fn main() {
         "src/cuda_kernel.cu"
     };
 
-    cc::Build::new()
+    let mut build = cc::Build::new();
+    build
         .cuda(true)
-        .flag("-allow-unsupported-compiler")
+        .flag("-ccbin=g++-13")
         .flag("-O3")
         .flag("-Xcompiler")
         .flag("-fPIC")
-        .file(cu_file)
-        .compile("cuda_kernel");
+        .file(cu_file);
 
-    // Force link directives for the compiled CUDA library and CUDA runtime
+    build.compile("cuda_kernel");
+
     println!("cargo:rustc-link-lib=static=cuda_kernel");
     println!("cargo:rustc-link-search=native=/usr/local/cuda/lib64");
     println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu");
