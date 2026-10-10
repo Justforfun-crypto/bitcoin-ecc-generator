@@ -22,14 +22,15 @@ fn main() {
 
     let out_dir = env::var("OUT_DIR").unwrap();
 
-    // Search paths for system CUDA libraries
+    // Search paths
     println!("cargo:rustc-link-search=native={}", out_dir);
     println!("cargo:rustc-link-search=native=/usr/local/cuda/lib64");
     println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu");
 
-    // Force link order: libcuda_kernel.a FIRST, then CUDA runtime APIs
+    // Order static archive first, then runtime dependencies AND libc for atexit
     println!("cargo:rustc-link-arg={}/libcuda_kernel.a", out_dir);
     println!("cargo:rustc-link-arg=-lcudart");
     println!("cargo:rustc-link-arg=-lcuda");
     println!("cargo:rustc-link-arg=-lstdc++");
+    println!("cargo:rustc-link-arg=-lc");
 }
