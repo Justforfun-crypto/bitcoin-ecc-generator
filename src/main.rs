@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Keyspace Range: [{}, {}]", args.start, args.end);
     println!("Chunk Size: {}", args.chunk_size);
 
-    match cuda_pipeline::run_multi_gpu_pipeline(args.start, args.end, args.chunk_size) {
+    match cuda_pipeline::run_multi_gpu_pipeline(args.start, args.end, args.chunk_size, &bloom_bytes) {
         Ok(_) => println!("Pipeline completed successfully!"),
         Err(e) => eprintln!("Pipeline execution error: {}", e),
     }
