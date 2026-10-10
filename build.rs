@@ -1,27 +1,35 @@
+use std::env;
+use std::path::Path;
+
 fn main() {
     println!("cargo:rerun-if-changed=src/cuda/secp256k1.cu");
     println!("cargo:rerun-if-changed=src/cuda_kernel.cu");
 
-    let cu_file = if std::path::Path::new("src/cuda/secp256k1.cu").exists() {
+    let cu_file = if Path::new("src/cuda/secp256k1.cu").exists() {
         "src/cuda/secp256k1.cu"
     } else {
         "src/cuda_kernel.cu"
     };
 
-    let mut build = cc::Build::new();
-    build
+    cc::Build::new()
         .cuda(true)
         .flag("-ccbin=g++-13")
         .flag("-O3")
         .flag("-Xcompiler")
         .flag("-fPIC")
-        .file(cu_file);
+        .file(cu_file)
+        .compile("cuda_kernel");
 
-    build.compile("cuda_kernel");
+    let out_dir = env::var("OUT_DIR").unwrap();
 
-    println!("cargo:rustc-link-lib=static=cuda_kernel");
+    // Search paths for system CUDA libraries
+    println!("cargo:rustc-link-search=native={}", out_dir);
     println!("cargo:rustc-link-search=native=/usr/local/cuda/lib64");
     println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu");
-    println!("cargo:rustc-link-lib=dylib=cudart");
-    println!("cargo:rustc-link-lib=dylib=stdc++");
+
+    // Force link order: libcuda_kernel.a FIRST, then CUDA runtime APIs
+    println!("cargo:rustc-link-arg={}/libcuda_kernel.a", out_dir);
+    println!("cargo:rustc-link-arg=-lcudart");
+    println!("cargo:rustc-link-arg=-lcuda");
+    println!("cargo:rustc-link-arg=-lstdc++");
 }
