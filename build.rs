@@ -1,24 +1,50 @@
+use std::path::PathBuf;
 use std::process::Command;
-use std::path::Path;
+
+fn find_nvcc() -> Option<PathBuf> {
+    // 1. Check PATH environment variable via `which nvcc`
+    if let Ok(output) = Command::new("which").arg("nvcc").output() {
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                return Some(PathBuf::from(path_str));
+            }
+        }
+    }
+
+    // 2. Check standard CUDA installation paths
+    let candidates = [
+        "/usr/bin/nvcc",
+        "/usr/local/cuda/bin/nvcc",
+        "/opt/cuda/bin/nvcc",
+    ];
+
+    for candidate in candidates {
+        let path = PathBuf::from(candidate);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    None
+}
 
 fn main() {
-    // Tell Cargo to re-run this build script if CUDA sources change
     println!("cargo:rerun-if-changed=src/cuda/secp256k1.cu");
     println!("cargo:rerun-if-changed=src/cuda_kernel.cu");
 
-    // Locate nvcc (default CUDA path or environment variable)
-    let cuda_path = std::env::var("CUDA_PATH").unwrap_or_else(|_| "/usr/local/cuda".to_string());
-    let nvcc = format!("{}/bin/nvcc", cuda_path);
+    let nvcc_path = find_nvcc().expect(
+        "Could not find `nvcc`. Ensure the NVIDIA CUDA Toolkit is installed and `nvcc` is in your PATH."
+    );
 
-    // Compile CUDA kernel into a static library or object file
     let out_dir = std::env::var("OUT_DIR").unwrap();
-    let cu_file = if Path::new("src/cuda/secp256k1.cu").exists() {
+    let cu_file = if std::path::Path::new("src/cuda/secp256k1.cu").exists() {
         "src/cuda/secp256k1.cu"
     } else {
         "src/cuda_kernel.cu"
     };
 
-    let status = Command::new(&nvcc)
+    let status = Command::new(&nvcc_path)
         .args(&[
             "-O3",
             "-Xcompiler",
@@ -29,13 +55,12 @@ fn main() {
             &format!("{}/cuda_kernel.o", out_dir),
         ])
         .status()
-        .expect("Failed to execute nvcc. Ensure CUDA toolkit is installed.");
+        .expect("Failed to execute nvcc.");
 
     if !status.success() {
         panic!("nvcc compilation failed");
     }
 
-    // Archive into libcuda_kernel.a
     let status = Command::new("ar")
         .args(&[
             "crus",
@@ -49,10 +74,10 @@ fn main() {
         panic!("ar archiving failed");
     }
 
-    // Pass link flags to rustc
     println!("cargo:rustc-link-search=native={}", out_dir);
     println!("cargo:rustc-link-lib=static=cuda_kernel");
-    println!("cargo:rustc-link-search=native={}/lib64", cuda_path);
+    println!("cargo:rustc-link-search=native=/usr/local/cuda/lib64");
+    println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu");
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=stdc++");
 }
