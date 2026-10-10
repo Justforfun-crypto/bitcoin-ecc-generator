@@ -1,136 +1,119 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read, Write};
-use std::path::Path;
+use std::collections::HashSet;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 
-#[derive(Clone, Debug)]
+pub struct TargetStore {
+    pub bloom_filter: BloomFilter,
+    pub exact_targets: HashSet<[u8; 20]>,
+}
+
+#[derive(Clone)]
 pub struct BloomFilter {
-    bits: Vec<u64>,
-    num_bits: usize,
-    num_hashes: u32,
+    pub bit_array: Vec<u8>,
+    pub num_hashes: usize,
 }
 
 impl BloomFilter {
-    pub fn new(expected_items: usize, false_positive_rate: f64) -> Self {
-        let expected_items = std::cmp::max(expected_items, 1);
-        let false_positive_rate = false_positive_rate.clamp(0.0001, 0.5);
-        
-        let ln2_sq = 0.4804530139182014;
-        let num_bits = ((-((expected_items as f64) * false_positive_rate.ln()) / ln2_sq).ceil()) as usize;
-        let num_bits = std::cmp::max(num_bits, 64);
-        let num_hashes = (((num_bits as f64 / expected_items as f64) * 0.6931471805599453).round() as u32).clamp(1, 30);
-        
-        let num_u64s = (num_bits + 63) / 64;
-        Self {
-            bits: vec![0u64; num_u64s],
-            num_bits,
-            num_hashes,
+    pub fn new(expected_elements: usize, false_positive_rate: f64) -> Self {
+        let size_in_bits = (-(expected_elements as f64) * false_positive_rate.ln() / (2.0f64.ln().powi(2))) as usize;
+        let size_in_bytes = (size_in_bits + 7) / 8;
+        let num_hashes = ((size_in_bits as f64 / expected_elements as f64) * 2.0f64.ln()).round() as usize;
+
+        BloomFilter {
+            bit_array: vec![0u8; size_in_bytes],
+            num_hashes: num_hashes.max(1),
         }
     }
 
-    fn hash_val<T: Hash>(&self, item: &T, i: u32) -> usize {
-        let mut h1 = DefaultHasher::new();
-        item.hash(&mut h1);
-        let seed1 = h1.finish();
-
-        let mut h2 = DefaultHasher::new();
-        (seed1 ^ (i as u64)).hash(&mut h2);
-        let seed2 = h2.finish();
-
-        let combined = seed1.wrapping_add((i as u64).wrapping_mul(seed2));
-        (combined as usize) % self.num_bits
-    }
-
-    pub fn insert<T: Hash>(&mut self, item: &T) {
+    pub fn insert(&mut self, item: &[u8; 20]) {
         for i in 0..self.num_hashes {
-            let idx = self.hash_val(item, i);
-            let word_idx = idx / 64;
-            let bit_idx = idx % 64;
-            self.bits[word_idx] |= 1u64 << bit_idx;
+            let bit_index = self.hash_index(item, i);
+            let byte_idx = bit_index / 8;
+            let bit_idx = bit_index % 8;
+            if byte_idx < self.bit_array.len() {
+                self.bit_array[byte_idx] |= 1 << bit_idx;
+            }
         }
     }
 
-    pub fn contains<T: Hash>(&self, item: &T) -> bool {
+    pub fn contains(&self, item: &[u8; 20]) -> bool {
         for i in 0..self.num_hashes {
-            let idx = self.hash_val(item, i);
-            let word_idx = idx / 64;
-            let bit_idx = idx % 64;
-            if (self.bits[word_idx] & (1u64 << bit_idx)) == 0 {
+            let bit_index = self.hash_index(item, i);
+            let byte_idx = bit_index / 8;
+            let bit_idx = bit_index % 8;
+            if byte_idx >= self.bit_array.len() || (self.bit_array[byte_idx] & (1 << bit_idx)) == 0 {
                 return false;
             }
         }
         true
     }
 
-    pub fn save_binary<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
-        let mut file = File::create(path).map_err(|e| e.to_string())?;
-        file.write_all(&(self.num_bits as u64).to_le_bytes()).map_err(|e| e.to_string())?;
-        file.write_all(&self.num_hashes.to_le_bytes()).map_err(|e| e.to_string())?;
-        file.write_all(&(self.bits.len() as u64).to_le_bytes()).map_err(|e| e.to_string())?;
-        for word in &self.bits {
-            file.write_all(&word.to_le_bytes()).map_err(|e| e.to_string())?;
-        }
-        Ok(())
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.bit_array.clone()
     }
 
-    pub fn load_binary<P: AsRef<Path>>(path: P) -> Result<Self, String> {
-        let mut file = File::open(path).map_err(|e| e.to_string())?;
-        let mut buf8 = [0u8; 8];
-        let mut buf4 = [0u8; 4];
-
-        file.read_exact(&mut buf8).map_err(|e| e.to_string())?;
-        let num_bits = u64::from_le_bytes(buf8) as usize;
-
-        file.read_exact(&mut buf4).map_err(|e| e.to_string())?;
-        let num_hashes = u32::from_le_bytes(buf4);
-
-        file.read_exact(&mut buf8).map_err(|e| e.to_string())?;
-        let len = u64::from_le_bytes(buf8) as usize;
-
-        let mut bits = vec![0u64; len];
-        for word in &mut bits {
-            file.read_exact(&mut buf8).map_err(|e| e.to_string())?;
-            *word = u64::from_le_bytes(buf8);
+    fn hash_index(&self, item: &[u8; 20], seed: usize) -> usize {
+        let mut hash = 0u64;
+        for &byte in item.iter() {
+            hash = hash.wrapping_mul(31).wrapping_add(byte as u64).wrapping_add(seed as u64);
         }
+        (hash as usize) % (self.bit_array.len() * 8)
+    }
+}
 
-        Ok(Self { bits, num_bits, num_hashes })
+/// Parses an input line into a raw 20-byte Hash160 payload.
+/// Supports Base58 P2PKH addresses (starts with '1') and 40-character hex strings.
+pub fn parse_target_line(line: &str) -> Option<[u8; 20]> {
+    let clean = line.trim().replace('\r', "");
+    if clean.is_empty() {
+        return None;
     }
 
-    pub fn load_from_file<P: AsRef<Path>>(path: P, false_positive_rate: f64) -> Result<(Self, usize), String> {
-        let txt_path = path.as_ref();
-        let bin_path = txt_path.with_extension("bin");
-
-        // If binary cache exists and is newer than txt, load instantly
-        if bin_path.exists() {
-            if let Ok(metadata_txt) = fs::metadata(txt_path) {
-                if let Ok(metadata_bin) = fs::metadata(&bin_path) {
-                    if metadata_bin.modified().unwrap() >= metadata_txt.modified().unwrap() {
-                        if let Ok(filter) = Self::load_binary(&bin_path) {
-                            println!("Loaded Bloom filter from binary cache ({}) instantly.", bin_path.display());
-                            // Count approximate items or return estimate
-                            return Ok((filter, 0));
-                        }
-                    }
-                }
+    // Case 1: Base58 P2PKH Address
+    if clean.starts_with('1') {
+        if let Ok(decoded) = bs58::decode(&clean).into_vec() {
+            if decoded.len() == 25 && decoded[0] == 0x00 {
+                let mut hash = [0u8; 20];
+                hash.copy_from_slice(&decoded[1..21]);
+                return Some(hash);
             }
         }
+    }
 
-        // Otherwise parse text file and generate binary cache
-        let file = File::open(txt_path).map_err(|e| format!("Failed to open targets file: {}", e))?;
-        let reader = BufReader::new(file);
-        let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
-        let count = lines.len();
-        
-        let mut filter = Self::new(std::cmp::max(count, 1000), false_positive_rate);
-        for line in lines {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                filter.insert(&trimmed);
+    // Case 2: Direct 40-character Hex String (Raw Hash160)
+    if clean.len() == 40 {
+        if let Ok(bytes) = hex::decode(&clean) {
+            if bytes.len() == 20 {
+                let mut hash = [0u8; 20];
+                hash.copy_from_slice(&bytes);
+                return Some(hash);
             }
         }
-
-        let _ = filter.save_binary(&bin_path);
-        Ok((filter, count))
     }
+
+    None
+}
+
+/// Loads and sanitizes targets file into both Pass 1 (Bloom) and Pass 2 (HashSet).
+pub fn load_targets_two_pass(file_path: &str) -> Result<TargetStore, Box<dyn std::error::Error>> {
+    let file = File::open(file_path)?;
+    let reader = BufReader::new(file);
+
+    let mut exact_targets = HashSet::new();
+    let mut bloom_filter = BloomFilter::new(100_000, 0.0001);
+
+    for line in reader.lines() {
+        let raw_line = line?;
+        if let Some(hash160) = parse_target_line(&raw_line) {
+            bloom_filter.insert(&hash160);
+            exact_targets.insert(hash160);
+        }
+    }
+
+    println!("Loaded {} valid Hash160 targets into exact HashSet.", exact_targets.len());
+
+    Ok(TargetStore {
+        bloom_filter,
+        exact_targets,
+    })
 }

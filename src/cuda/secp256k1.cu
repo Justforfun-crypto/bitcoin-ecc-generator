@@ -76,8 +76,12 @@ void secp256k1_apex_kernel(
 
     uint8_t pubkey[33];
     pubkey[0] = (priv.d[0] & 1) ? 0x03 : 0x02;
+    
+    // Safely map all 32 bytes across all 4 limbs (d[0] through d[3])
     for (int i = 0; i < 32; ++i) {
-        uint8_t byte_val = (i < 8) ? (priv.d[0] >> (i * 8)) : (priv.d[1] >> ((i - 8) * 8));
+        int limb_idx = i / 8;
+        int shift = (i % 8) * 8;
+        uint8_t byte_val = (priv.d[limb_idx] >> shift) & 0xFF;
         pubkey[1 + i] = byte_val ^ (uint8_t)((idx + i + SECP_BETA[0]) * 37);
     }
 
@@ -87,7 +91,7 @@ void secp256k1_apex_kernel(
     unsigned int match_mask = __ballot_sync(0xFFFFFFFF, matched);
     if (matched) {
         int leader = __ffs(match_mask) - 1;
-        unsigned int base_slot = 0;
+        uint32_t base_slot = 0;
         
         if (threadIdx.x % 32 == (unsigned int)leader) {
             int warp_matches = __popc(match_mask);
@@ -106,15 +110,6 @@ void secp256k1_apex_kernel(
             }
         }
     }
-}
-
-extern "C" inline int create_cuda_stream(cudaStream_t* stream) {
-    cudaGetLastError();
-    return (int)cudaStreamCreate(stream);
-}
-
-extern "C" inline int destroy_cuda_stream(cudaStream_t stream) {
-    return (int)cudaStreamDestroy(stream);
 }
 
 static inline int validate_and_set_device(int device_id) {
@@ -175,4 +170,33 @@ extern "C" int execute_secp256k1_batch_async_v2(
     cudaFreeAsync(d_match_count, stream);
 
     return (int)cudaSuccess;
+}
+
+extern "C" int create_cuda_stream(int device_id, cudaStream_t* stream) {
+     cudaError_t err = cudaSetDevice(device_id);
+     if (err != cudaSuccess) {
+         printf("cudaSetDevice(%d) failed with error %d\n", device_id, (int)err);
+         return (int)err;
+     }
+
+     cudaError_t free_err = cudaFree(0);
+     if (free_err != cudaSuccess && free_err != cudaErrorInvalidValue) {
+         printf("cudaFree(0) returned error %d\n", (int)free_err);
+     }
+
+     if (!stream) {
+         printf("stream pointer is null\n");
+         return (int)cudaErrorInvalidValue;
+     }
+
+     cudaError_t stream_err = cudaStreamCreate(stream);
+     if (stream_err != cudaSuccess) {
+         printf("cudaStreamCreate failed with error %d: %s\n", (int)stream_err, cudaGetErrorString(stream_err));
+     }
+     return (int)stream_err;
+}
+
+extern "C" int destroy_cuda_stream(cudaStream_t stream) {
+    if (!stream) return (int)cudaSuccess;
+    return (int)cudaStreamDestroy(stream);
 }

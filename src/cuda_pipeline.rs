@@ -14,7 +14,7 @@ pub struct MatchResult {
 pub type cudaStream_t = *mut std::os::raw::c_void;
 
 extern "C" {
-    fn create_cuda_stream(stream: *mut cudaStream_t) -> i32;
+    fn create_cuda_stream(device_id: i32, stream: *mut cudaStream_t) -> i32;
     fn destroy_cuda_stream(stream: cudaStream_t) -> i32;
     fn execute_secp256k1_batch_async_v2(
         device_id: i32,
@@ -72,7 +72,7 @@ impl GpuPipelineManager {
     pub fn new(device_id: i32, _num_streams: usize) -> Result<Self, String> {
         let mut stream: cudaStream_t = ptr::null_mut();
         unsafe {
-            let res = create_cuda_stream(&mut stream);
+            let res = create_cuda_stream(device_id, &mut stream);
             if res != 0 {
                 return Err(format!("Failed to create async CUDA stream: error code {}", res));
             }
@@ -85,20 +85,19 @@ impl GpuPipelineManager {
         })
     }
 
-    pub fn submit(&self, work_item: WorkItem) -> Result<(), String> {
+    pub fn submit(&self, work_item: WorkItem, bloom_bytes: &[u8]) -> Result<(), String> {
         let mut queue = self.queue.lock().map_err(|e| e.to_string())?;
         queue.push(work_item);
         drop(queue);
-        self.process_queue_internal()?;
+        self.process_queue_internal(bloom_bytes)?;
         Ok(())
     }
 
-    fn process_queue_internal(&self) -> Result<(), String> {
+    fn process_queue_internal(&self, bloom_bytes: &[u8]) -> Result<(), String> {
         let mut queue = self.queue.lock().map_err(|e| e.to_string())?;
         let mut results = self.results.lock().map_err(|e| e.to_string())?;
 
-        let empty_bloom = Vec::new();
-        let mut match_buffer = vec![MatchResult { priv_low: 0, priv_high: 0, compressed_pubkey: [0; 33] }; 2048];
+            let mut match_buffer = vec![MatchResult { priv_low: 0, priv_high: 0, compressed_pubkey: [0; 33] }; 2048];
 
         while let Some(item) = queue.pop() {
             let limbs = if item.input_a[0] != 0 || item.input_a[1] != 0 {
@@ -114,8 +113,8 @@ impl GpuPipelineManager {
                     self.device_id,
                     limbs.as_ptr(),
                     count,
-                    empty_bloom.as_ptr(),
-                    empty_bloom.len(),
+                    bloom_bytes.as_ptr(),
+                    bloom_bytes.len(),
                     match_buffer.as_mut_ptr(),
                     match_buffer.len() as u32,
                     &mut match_count,
@@ -206,12 +205,15 @@ pub fn run_multi_gpu_pipeline(
     start: u64,
     end: u64,
     chunk_size: usize,
+    bloom_bytes: &[u8],
 ) -> Result<Vec<MatchResult>, String> {
     let manager = GpuPipelineManager::new(0, 2)?;
     let mut current = start;
+        let gpu_start_time = std::time::Instant::now();
+        let mut gpu_keys_scanned: u64 = 0;
+        let mut gpu_last_print = std::time::Instant::now();
     let mut all_matches = Vec::new();
     let mut match_buffer = vec![MatchResult { priv_low: 0, priv_high: 0, compressed_pubkey: [0; 33] }; 2048];
-    let empty_bloom = Vec::new();
 
     while current < end {
         let span = end - current;
@@ -223,12 +225,19 @@ pub fn run_multi_gpu_pipeline(
         };
 
         let current_biguint = BigUint::from(current);
-        let found = manager.execute_batch(&current_biguint, count, &empty_bloom, &mut match_buffer)?;
+        let found = manager.execute_batch(&current_biguint, count, bloom_bytes, &mut match_buffer)?;
         for i in 0..(found as usize) {
             all_matches.push(match_buffer[i]);
         }
 
         current += count;
+                gpu_keys_scanned += count;
+                let elapsed = gpu_start_time.elapsed().as_secs_f64();
+                if gpu_last_print.elapsed().as_secs_f64() >= 2.0 && elapsed > 0.0 {
+                    let mkeys = (gpu_keys_scanned as f64 / elapsed) / 1_000_000.0;
+                    println!("[GPU {} Throughput] Scanned: {} keys | Speed: {:.2} Mkeys/sec | Elapsed: {:.1}s", 0, gpu_keys_scanned, mkeys, elapsed);
+                    gpu_last_print = std::time::Instant::now();
+                }
     }
 
     Ok(all_matches)
