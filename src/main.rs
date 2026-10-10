@@ -20,6 +20,9 @@ struct Args {
 
     #[arg(short, long, default_value_t = 5000)]
     chunk_size: usize,
+
+    #[arg(short, long, default_value_t = false)]
+    continuous: bool,
 }
 
 pub fn verify_and_log_match(
@@ -60,12 +63,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let target_store = load_targets_two_pass(&args.target_file)?;
     let bloom_bytes = target_store.bloom_filter.to_bytes();
 
-    println!("Keyspace Range: [{}, {}]", args.start, args.end);
-    println!("Chunk Size: {}", args.chunk_size);
+    let mut current_start = args.start;
+    let range = args.end.saturating_sub(args.start);
 
-    match cuda_pipeline::run_multi_gpu_pipeline(args.start, args.end, args.chunk_size, &bloom_bytes) {
-        Ok(_) => println!("Pipeline completed successfully!"),
-        Err(e) => eprintln!("Pipeline execution error: {}", e),
+    loop {
+        let current_end = if args.continuous && range > 0 {
+            current_start.saturating_add(range)
+        } else {
+            args.end
+        };
+
+        println!("Keyspace Range: [{}, {}]", current_start, current_end);
+        println!("Chunk Size: {}", args.chunk_size);
+
+        match cuda_pipeline::run_multi_gpu_pipeline(current_start, current_end, args.chunk_size, &bloom_bytes) {
+            Ok(_) => println!("Chunk execution completed."),
+            Err(e) => eprintln!("Pipeline execution error: {}", e),
+        }
+
+        if !args.continuous {
+            break;
+        }
+
+        current_start = current_end.saturating_add(1);
     }
 
     Ok(())
