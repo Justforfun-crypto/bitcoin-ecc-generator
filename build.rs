@@ -10,6 +10,7 @@ fn main() {
 
     cc::Build::new()
         .cuda(true)
+        .flag("-ccbin=g++-13")
         .flag("-O3")
         .flag("-Xcompiler")
         .flag("-fPIC")
