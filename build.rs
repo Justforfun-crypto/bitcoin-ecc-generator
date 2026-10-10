@@ -1,48 +1,58 @@
 use std::process::Command;
-use std::env;
 use std::path::Path;
 
 fn main() {
+    // Tell Cargo to re-run this build script if CUDA sources change
     println!("cargo:rerun-if-changed=src/cuda/secp256k1.cu");
+    println!("cargo:rerun-if-changed=src/cuda_kernel.cu");
 
-    let out_dir = env::var("OUT_DIR").unwrap();
-    let cuda_obj = Path::new(&out_dir).join("secp256k1.o");
+    // Locate nvcc (default CUDA path or environment variable)
+    let cuda_path = std::env::var("CUDA_PATH").unwrap_or_else(|_| "/usr/local/cuda".to_string());
+    let nvcc = format!("{}/bin/nvcc", cuda_path);
 
-    let status = Command::new("nvcc")
+    // Compile CUDA kernel into a static library or object file
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let cu_file = if Path::new("src/cuda/secp256k1.cu").exists() {
+        "src/cuda/secp256k1.cu"
+    } else {
+        "src/cuda_kernel.cu"
+    };
+
+    let status = Command::new(&nvcc)
         .args(&[
             "-O3",
-            "-gencode=arch=compute_89,code=compute_89",
-            "-gencode=arch=compute_89,code=sm_89",
-            "--compiler-options", "-fPIC",
-            "-c", "src/cuda/secp256k1.cu",
-            "-o", cuda_obj.to_str().unwrap(),
+            "-Xcompiler",
+            "-fPIC",
+            "-c",
+            cu_file,
+            "-o",
+            &format!("{}/cuda_kernel.o", out_dir),
         ])
-        .status();
+        .status()
+        .expect("Failed to execute nvcc. Ensure CUDA toolkit is installed.");
 
-    match status {
-        Ok(s) if s.success() => println!("cargo:warning=Ultimate CUDA kernel compiled successfully!"),
-        Ok(s) => panic!("NVCC compilation failed: {}", s),
-        Err(e) => panic!("Failed to execute NVCC: {}", e),
+    if !status.success() {
+        panic!("nvcc compilation failed");
     }
 
-    let lib_path = Path::new(&out_dir).join("libsecp256k1_cuda.a");
-    let ar_status = Command::new("ar")
-        .args(&["rs", lib_path.to_str().unwrap(), cuda_obj.to_str().unwrap()])
+    // Archive into libcuda_kernel.a
+    let status = Command::new("ar")
+        .args(&[
+            "crus",
+            &format!("{}/libcuda_kernel.a", out_dir),
+            &format!("{}/cuda_kernel.o", out_dir),
+        ])
         .status()
         .expect("Failed to execute ar");
 
-    if !ar_status.success() {
-        panic!("Failed to create static library");
+    if !status.success() {
+        panic!("ar archiving failed");
     }
 
+    // Pass link flags to rustc
     println!("cargo:rustc-link-search=native={}", out_dir);
-    println!("cargo:rustc-link-lib=static=secp256k1_cuda");
-    println!("cargo:rustc-link-lib=stdc++");
-    println!("cargo:rustc-link-lib=cudart");
-
-    if let Ok(cuda_path) = env::var("CUDA_PATH") {
-        println!("cargo:rustc-link-search=native={}/lib64", cuda_path);
-    } else {
-        println!("cargo:rustc-link-search=native=/usr/local/cuda/lib64");
-    }
+    println!("cargo:rustc-link-lib=static=cuda_kernel");
+    println!("cargo:rustc-link-search=native={}/lib64", cuda_path);
+    println!("cargo:rustc-link-lib=dylib=cudart");
+    println!("cargo:rustc-link-lib=dylib=stdc++");
 }
