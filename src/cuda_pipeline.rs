@@ -226,7 +226,8 @@ pub fn run_multi_gpu_pipeline(
 
         let current_biguint = BigUint::from(current);
         let found = manager.execute_batch(&current_biguint, count, bloom_bytes, &mut match_buffer)?;
-        for i in 0..(found as usize) {
+        let safe_found = (found as usize).min(match_buffer.len());
+        for i in 0..safe_found {
             all_matches.push(match_buffer[i]);
         }
 
